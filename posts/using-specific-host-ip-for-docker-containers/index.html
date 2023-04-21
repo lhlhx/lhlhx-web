@@ -1,0 +1,52 @@
+<!doctype html><html><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge"><title>Using specific host IP (interface) for docker containers - lhlhx</title><meta name=viewport content="width=device-width,initial-scale=1"><meta name=description content="How to have containers choosing the correct interface for outbound traffic."><meta property="og:image" content><meta property="og:title" content="Using specific host IP (interface) for docker containers"><meta property="og:description" content="How to have containers choosing the correct interface for outbound traffic."><meta property="og:type" content="article"><meta property="og:url" content="https://lhlhx.com/posts/using-specific-host-ip-for-docker-containers/"><meta property="article:section" content="posts"><meta property="article:published_time" content="2023-04-01T00:00:00+01:00"><meta property="article:modified_time" content="2023-04-01T00:00:00+01:00"><meta name=twitter:card content="summary"><meta name=twitter:title content="Using specific host IP (interface) for docker containers"><meta name=twitter:description content="How to have containers choosing the correct interface for outbound traffic."><script src=https://lhlhx.com/js/feather.min.js></script>
+<link href=https://lhlhx.com/css/fonts.2c2227b81b1970a03e760aa2e6121cd01f87c88586803cbb282aa224720a765f.css rel=stylesheet><link rel=stylesheet type=text/css media=screen href=https://lhlhx.com/css/main.ac08a4c9714baa859217f92f051deb58df2938ec352b506df655005dcaf98cc0.css><link id=darkModeStyle rel=stylesheet type=text/css href=https://lhlhx.com/css/dark.726cd11ca6eb7c4f7d48eb420354f814e5c1b94281aaf8fd0511c1319f7f78a4.css></head><body><div class=content><header><div class=main><a href=https://lhlhx.com/>lhlhx</a></div><nav><a href=/>Home</a>
+<a href=/posts>Posts</a>
+<a href=/about>About</a>
+<a href=/tags>Tags</a></nav></header><main><article><div class=title><h1 class=title>Using specific host IP (interface) for docker containers</h1><div class=meta>Posted on Apr 1, 2023</div></div><section class=body><h2 id=introduction>Introduction</h2><p>The following article describes how I select a specific host IP for egress traffic in a specific docker container.</p><p>It was a trick used few years ago, at that time 2 seperate sites were sharing the same VPS, each has its own designated IP.
+What I would like to achieve is that each site should only use its own IP for egress traffic.</p><ul><li>Site A IP: 10.201.0.201 interface: eth0</li><li>Site B IP: 10.201.0.202 interface: eth0:1</li></ul><p>Here you can see I have 2 IPs on eth0:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback><span style=display:flex><span>[root@vps ~]# ip add 
+</span></span><span style=display:flex><span>...
+</span></span><span style=display:flex><span>2: eth0: &lt;BROADCAST,MULTICAST,UP,LOWER_UP&gt; mtu 1500 qdisc pfifo_fast state UP grup default qlen 1000
+</span></span><span style=display:flex><span>    link/ether AA:BB:CC:0e:ce:28 brd ff:ff:ff:ff:ff:ff
+</span></span><span style=display:flex><span>    inet 10.201.0.201/24 brd 10.201.0.255 scope global dynamic eth0
+</span></span><span style=display:flex><span>       valid_lft 80555sec preferred_lft 80555sec
+</span></span><span style=display:flex><span>    inet 10.201.0.202/24 brd 10.201.0.255 scope global eth0:1
+</span></span><span style=display:flex><span>       valid_lft forever preferred_lft forever
+</span></span><span style=display:flex><span>...
+</span></span></code></pre></div><p>Here is the routing table on my VPS:</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback><span style=display:flex><span>[root@vps ~]# ip route
+</span></span><span style=display:flex><span>default via 10.201.0.254 dev eth0
+</span></span><span style=display:flex><span>10.201.0.0/24 dev eth0 proto kernel scope link src 10.201.0.201
+</span></span><span style=display:flex><span>...
+</span></span></code></pre></div><p>So that&rsquo;s all for my network setup! Let&rsquo;s look at the Docker-compose YAML file.</p><h2 id=docker-compose>Docker-Compose</h2><p>In my docker-compose.yaml file, you can see I have deployed softEtherVPN.</p><p>Everything is as usual except I have created a network <em>net_iptwo</em> and have <em>NET_ADMIN</em> enabled.</p><p>The network <em>net_uptwo</em>, applies a default route to the container, and also assigns an IP with subnet 192.168.200.0/24 to the container</p><p>Fire up the service with <code>docker-compose up -d</code> then we are good to prepare for firewalld rules</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback><span style=display:flex><span># docker-compose.yaml
+</span></span><span style=display:flex><span>version: &#39;3&#39;
+</span></span><span style=display:flex><span>services:
+</span></span><span style=display:flex><span>  softether1:
+</span></span><span style=display:flex><span>    container_name: nic-softether1
+</span></span><span style=display:flex><span>    image: siomiz/softethervpn
+</span></span><span style=display:flex><span>    networks:
+</span></span><span style=display:flex><span>      - net_iptwo
+</span></span><span style=display:flex><span>    volumes:
+</span></span><span style=display:flex><span>      - ./softether/vpn_server.config:/usr/vpnserver/vpn_server.config
+</span></span><span style=display:flex><span>    cap_add:
+</span></span><span style=display:flex><span>      - NET_ADMIN
+</span></span><span style=display:flex><span>    ports:
+</span></span><span style=display:flex><span>      - 192.168.100.100:500:500/udp
+</span></span><span style=display:flex><span>      - 192.168.100.100:4500:4500/udp
+</span></span><span style=display:flex><span>      - 192.168.100.100:1701:1701/tcp
+</span></span><span style=display:flex><span>      - 192.168.100.100:1194:1194/udp
+</span></span><span style=display:flex><span>      - 192.168.100.100:5555:5555/tcp
+</span></span><span style=display:flex><span>networks:
+</span></span><span style=display:flex><span>  net_iptwo:
+</span></span><span style=display:flex><span>    driver: bridge
+</span></span><span style=display:flex><span>    driver_opts:
+</span></span><span style=display:flex><span>      com.docker.network.bridge.enable_icc: &#34;true&#34;
+</span></span><span style=display:flex><span>      com.docker.network.bridge.enable_ip_masquerade: &#34;false&#34;
+</span></span><span style=display:flex><span>      com.docker.network.bridge.host_binding_ipv4: &#34;0.0.0.0&#34;
+</span></span><span style=display:flex><span>      com.docker.network.bridge.name: &#34;br_ip2&#34;
+</span></span><span style=display:flex><span>      com.docker.network.driver.mtu: &#34;1500&#34;
+</span></span><span style=display:flex><span>    ipam:
+</span></span><span style=display:flex><span>      driver: default
+</span></span><span style=display:flex><span>      config:
+</span></span><span style=display:flex><span>        - subnet: 192.168.200.0/24
+</span></span></code></pre></div><h2 id=firewalld>Firewalld</h2><p>This Firewall rule is a self-explainatory one-liner: whenever the source is from 192.168.200.0/24 subnet, do SNAT to 10.201.0.202</p><div class=highlight><pre tabindex=0 style=color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback><span style=display:flex><span>firewall-cmd --permanent --direct --add-rule ipv4 nat POSTROUTING 0 -s 192.168.200.0/24 -j SNAT --to-source 10.201.0.202
+</span></span></code></pre></div><h2 id=viola-we-are-all-good-to-go>Viola! We are all good to go!</h2></section><div class=post-tags><nav class="nav tags"><ul class=tags><li><a href=/tags/network>network</a></li><li><a href=/tags/docker>docker</a></li><li><a href=/tags/firewalld>firewalld</a></li><li><a href=/tags/centos>centos</a></li></ul></nav></div></article></main><footer><div style=display:flex><a class=soc href=https://github.com/lhlhx rel=me title=GitHub><i data-feather=github></i></a>
+<a class=border></a></div><div class=footer-info>2023 © lhlhx CC BY 4.0 | <a href=https://github.com/athul/archie>Archie Theme</a> | Built with <a href=https://gohugo.io>Hugo</a></div></footer><script>feather.replace()</script></div></body></html>
